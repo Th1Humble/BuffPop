@@ -1,0 +1,21 @@
+{
+  "name": "buffpop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm dev:web",
+    "dev:all": "pnpm -r --parallel --stream --filter @buffpop/api --filter @buffpop/web run dev",
+    "dev:web": "pnpm --dir apps/web dev",
+    "dev:api": "pnpm --dir apps/api dev",
+    "build": "pnpm --dir apps/api build && pnpm --dir apps/web build",
+    "preview": "pnpm --dir apps/web preview",
+    "test": "pnpm --dir apps/api test && pnpm --dir apps/web test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}
