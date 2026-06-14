@@ -29,19 +29,19 @@ const hudStyles = `
   }
 
   .stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     color: #fffaf2;
-    padding: 42px 64px 0;
-  }
-
-  .stage--single {
-    padding: 52px 64px 0;
+    padding: 64px;
   }
 
   .stack {
     display: grid;
     gap: 38px;
     width: 100%;
+    min-height: 0;
   }
 
   .hud {
@@ -133,6 +133,59 @@ const hudStyles = `
     font-weight: 850;
     line-height: 1;
     text-shadow: 0 2px 7px rgba(0, 0, 0, 0.3);
+  }
+
+  .value-wrap {
+    position: relative;
+    display: grid;
+    justify-items: end;
+  }
+
+  .delta-pop {
+    position: absolute;
+    right: -18px;
+    top: -34px;
+    min-width: 76px;
+    border: 2px solid color-mix(in srgb, var(--c), white 42%);
+    border-radius: 999px;
+    padding: 8px 16px;
+    color: #151515;
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+    background:
+      radial-gradient(circle at 30% 20%, rgba(255,255,255,.96), transparent 32%),
+      linear-gradient(135deg, color-mix(in srgb, var(--c), white 52%), color-mix(in srgb, var(--c), white 16%));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.5),
+      0 0 28px color-mix(in srgb, var(--c), transparent 38%),
+      0 10px 26px rgba(0, 0, 0, 0.28);
+    transform: translateY(var(--pop-y)) scale(var(--pop-scale));
+    opacity: var(--pop-opacity);
+  }
+
+  .delta-pop::before,
+  .delta-pop::after {
+    position: absolute;
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: #fff7d6;
+    box-shadow: 0 0 14px color-mix(in srgb, var(--c), white 12%);
+    content: "";
+    opacity: var(--spark-opacity);
+    transform: translate(var(--spark-x), var(--spark-y)) scale(var(--spark-scale));
+  }
+
+  .delta-pop::before {
+    top: -5px;
+    left: -11px;
+  }
+
+  .delta-pop::after {
+    right: -11px;
+    bottom: -4px;
   }
 
   .track {
@@ -246,9 +299,71 @@ function buildFrameStatuses(props: RemotionHudProps, progress: number): Remotion
   });
 }
 
-function HudRow({ status }: { status: RemotionHudStatus }) {
+function deltaPopState(progress: number) {
+  const clampedProgress = clamp(progress, 0, 1);
+  const opacity =
+    clampedProgress < 0.72
+      ? 1
+      : interpolate(clampedProgress, [0.72, 1], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+  const y = interpolate(clampedProgress, [0, 0.32, 1], [8, -10, -32], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const scale = interpolate(clampedProgress, [0, 0.18, 1], [0.74, 1.16, 0.96], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const sparkOpacity = interpolate(clampedProgress, [0, 0.14, 0.3, 1], [0, 0, 0.95, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const sparkX = interpolate(clampedProgress, [0, 1], [0, -14], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const sparkY = interpolate(clampedProgress, [0, 1], [0, -22], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const sparkScale = interpolate(clampedProgress, [0, 0.28, 1], [0.5, 1, 0.35], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  return { opacity, y, scale, sparkOpacity, sparkX, sparkY, sparkScale };
+}
+
+function getAnimationProgress({
+  frame,
+  fps,
+  durationMs,
+  leadInMs = 0,
+}: {
+  frame: number;
+  fps: number;
+  durationMs: number;
+  leadInMs?: number;
+}) {
+  const elapsedMs = (frame / fps) * 1000;
+  return clamp((elapsedMs - leadInMs) / durationMs, 0, 1);
+}
+
+function HudRow({
+  status,
+  event,
+  progress,
+}: {
+  status: RemotionHudStatus;
+  event?: RemotionHudProps["event"];
+  progress: number;
+}) {
   const ratio = status.max > 0 ? clamp(renderValueOf(status) / status.max, 0, 1) : 0;
   const color = status.color;
+  const popState = deltaPopState(progress);
+  const deltaLabel = event?.statusId === status.id && progress > 0 ? event.deltaLabel : "";
 
   return (
     <article
@@ -258,6 +373,13 @@ function HudRow({ status }: { status: RemotionHudStatus }) {
           "--c": color,
           "--soft": `${color}2e`,
           "--fill": `${Math.round(ratio * 1000) / 10}%`,
+          "--pop-opacity": popState.opacity,
+          "--pop-y": `${popState.y}px`,
+          "--pop-scale": popState.scale,
+          "--spark-opacity": popState.sparkOpacity,
+          "--spark-x": `${popState.sparkX}px`,
+          "--spark-y": `${popState.sparkY}px`,
+          "--spark-scale": popState.sparkScale,
         } as React.CSSProperties
       }
     >
@@ -271,9 +393,12 @@ function HudRow({ status }: { status: RemotionHudStatus }) {
       <div className="body">
         <div className="meta">
           <span className="label">{displayLabel(status)}</span>
-          <strong>
-            {status.value}/{status.max}
-          </strong>
+          <div className="value-wrap">
+            {deltaLabel ? <span className="delta-pop">{deltaLabel}</span> : null}
+            <strong>
+              {status.value}/{status.max}
+            </strong>
+          </div>
         </div>
         <div className="track">
           <div className="fill" />
@@ -287,12 +412,19 @@ function HudRow({ status }: { status: RemotionHudStatus }) {
 function BuffPopOverlay(props: RemotionHudProps) {
   const frame = useCurrentFrame();
   const config = useVideoConfig();
-  const lastFrame = Math.max(1, config.durationInFrames - 1);
-  const progress = interpolate(frame, [0, lastFrame], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
+  const progress = getAnimationProgress({
+    frame,
+    fps: config.fps,
+    durationMs: props.preset.durationMs,
+    leadInMs: props.preset.leadInMs,
   });
   const frameStatuses = buildFrameStatuses(props, progress);
+  const eventsByStatusId = new Map(
+    (props.events?.length ? props.events : [props.event]).map((event) => [
+      event.statusId,
+      event,
+    ]),
+  );
   const visibleStatuses =
     props.scope === "single"
       ? frameStatuses.filter((status) => status.id === props.event.statusId)
@@ -303,7 +435,12 @@ function BuffPopOverlay(props: RemotionHudProps) {
       <style>{hudStyles}</style>
       <div className="stack">
         {visibleStatuses.map((status) => (
-          <HudRow key={status.id} status={status} />
+          <HudRow
+            key={status.id}
+            status={status}
+            event={eventsByStatusId.get(status.id)}
+            progress={progress}
+          />
         ))}
       </div>
     </AbsoluteFill>

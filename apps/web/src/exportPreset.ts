@@ -7,6 +7,7 @@ export type ExportPreset = {
   height: number;
   fps: number;
   durationMs: number;
+  leadInMs: number;
   format: ExportFormat;
 };
 
@@ -15,5 +16,6 @@ export const defaultExportPreset: ExportPreset = {
   height: 1920,
   fps: 60,
   durationMs: 1600,
+  leadInMs: 220,
   format: "mov-prores-alpha",
 };

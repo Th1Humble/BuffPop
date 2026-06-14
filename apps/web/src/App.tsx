@@ -1,10 +1,14 @@
-import type { CSSProperties, FormEvent } from "react";
+import type { ClipboardEvent, CSSProperties, DragEvent, FormEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultExportPreset } from "./exportPreset";
 import {
+  type AvatarExportConfig,
+  type AvatarMood,
   createExportPlan,
   downloadBlob,
+  exportAvatarToPng,
   exportPlanToVideo,
+  formatDeltaBadge,
   type ExportSource,
   type ExportScope,
   type ExportResult,
@@ -35,7 +39,13 @@ import {
 } from "./stateEngine";
 
 const animationDurationMs = defaultExportPreset.durationMs;
-
+const animationLeadInMs = defaultExportPreset.leadInMs;
+const avatarMoodOptions: Array<{ id: AvatarMood; label: string; symbol: string }> = [
+  { id: "happy", label: "开心", symbol: "😄" },
+  { id: "calm", label: "平静", symbol: "🙂" },
+  { id: "tired", label: "疲惫", symbol: "😴" },
+  { id: "hungry", label: "饥饿", symbol: "😋" },
+];
 type DisplayStatusItem = StatusItem & {
   renderValue?: number;
 };
@@ -52,16 +62,24 @@ function HudBar({
   status,
   isActive,
   copy,
+  activeEvent,
+  activePopEventId,
 }: {
   status: DisplayStatusItem;
   isActive: boolean;
   copy: AppCopy;
+  activeEvent?: StatusEvent;
+  activePopEventId?: string | null;
 }) {
   const level = getStatusLevel(status);
   const barStyle = { "--bar-color": status.color } as CSSProperties & {
     "--bar-color": string;
   };
   const label = getStatusLabel(copy, status.id, status.label, status.customLabel);
+  const deltaLabel =
+    activeEvent?.statusId === status.id && activeEvent.id === activePopEventId
+      ? formatDeltaBadge(activeEvent.appliedDelta)
+      : "";
 
   return (
     <article
@@ -75,9 +93,16 @@ function HudBar({
       <div className="hud-content">
         <div className="hud-meta">
           <span>{label}</span>
-          <strong>
-            {status.value}/{status.max}
-          </strong>
+          <div className="hud-value-wrap">
+            {deltaLabel && activeEvent ? (
+              <span className="delta-pop" key={activeEvent.id}>
+                {deltaLabel}
+              </span>
+            ) : null}
+            <strong>
+              {status.value}/{status.max}
+            </strong>
+          </div>
         </div>
         <div className="meter-track" aria-hidden="true">
           <div className="meter-fill" style={{ width: `${percentFor(status)}%` }} />
@@ -85,6 +110,45 @@ function HudBar({
         </div>
       </div>
     </article>
+  );
+}
+
+function AvatarHudPanel({ config }: { config: AvatarExportConfig }) {
+  const mood = avatarMoodOptions.find((option) => option.id === config.mood) ?? avatarMoodOptions[0];
+  const tagline = config.tagline?.trim() || "PLAYER HUD";
+  const taglineParts = tagline.split(/\s+/).slice(0, 3);
+  const panelStyle = {
+    "--avatar-size": `${config.size}px`,
+    "--avatar-scale": `${config.imageScale ?? 1}`,
+    "--avatar-x": `${config.imageOffsetX ?? 0}%`,
+    "--avatar-y": `${config.imageOffsetY ?? 0}%`,
+  } as CSSProperties;
+  const hasImage = Boolean(config.imageSrc);
+
+  return (
+    <section
+      className={`avatar-hud-panel avatar-hud-panel--${config.mood}`}
+      style={panelStyle}
+      aria-label="头像 HUD"
+    >
+      <div className={`avatar-hud-portrait ${hasImage ? "has-image" : ""}`}>
+        {config.imageSrc ? (
+          <img src={config.imageSrc} alt="" aria-hidden="true" />
+        ) : (
+          <span aria-hidden="true">{mood.symbol}</span>
+        )}
+      </div>
+      <div className="avatar-hud-body">
+        <div className="avatar-hud-meta">
+          <span>{config.label.trim() || "角色"}</span>
+        </div>
+        <div className="avatar-hud-tags" aria-hidden="true">
+          {taglineParts.map((part) => (
+            <span key={part}>{part}</span>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -120,6 +184,19 @@ function App() {
   const [recordingEvents, setRecordingEvents] = useState<StatusEvent[]>([]);
   const [confirmedRecordingEvents, setConfirmedRecordingEvents] = useState<StatusEvent[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [activePopEventId, setActivePopEventId] = useState<string | null>(null);
+  const [avatarConfig, setAvatarConfig] = useState<AvatarExportConfig>({
+    mood: "happy",
+    size: 220,
+    label: "阿年",
+    tagline: "PLAYER HUD",
+    imageScale: 1,
+    imageOffsetX: 0,
+    imageOffsetY: 0,
+  });
+  const [avatarImageName, setAvatarImageName] = useState("");
+  const [avatarResult, setAvatarResult] = useState<ExportResult | null>(null);
+  const [avatarError, setAvatarError] = useState("");
   const animationFrameRef = useRef<number | null>(null);
   const lastEvent = events[0];
   const copy = useMemo(() => getCopy(language), [language]);
@@ -144,20 +221,29 @@ function App() {
     if (animationFrameRef.current !== null) {
       cancelAnimationFrame(animationFrameRef.current);
     }
+    setActivePopEventId(null);
 
     const startedAt = performance.now();
+    let hasActivatedPop = false;
 
     const tick = (now: number) => {
-      const progress = easeLinear((now - startedAt) / animationDurationMs);
+      const elapsedMs = now - startedAt;
+      const progress = easeLinear((elapsedMs - animationLeadInMs) / animationDurationMs);
       const renderValue = event.from + (event.to - event.from) * progress;
       setDisplayStatuses(applyDisplayValue(nextStatuses, event.statusId, renderValue));
 
-      if (progress < 1) {
+      if (!hasActivatedPop && elapsedMs >= animationLeadInMs) {
+        hasActivatedPop = true;
+        setActivePopEventId(event.id);
+      }
+
+      if (elapsedMs < animationLeadInMs + animationDurationMs) {
         animationFrameRef.current = requestAnimationFrame(tick);
         return;
       }
 
       animationFrameRef.current = null;
+      setActivePopEventId(null);
       setDisplayStatuses(cloneStatuses(nextStatuses));
     };
 
@@ -243,6 +329,72 @@ function App() {
     }
   }
 
+  async function handleAvatarExport() {
+    setAvatarError("");
+    setAvatarResult(null);
+
+    try {
+      const canvas = document.createElement("canvas");
+      const result = await exportAvatarToPng({ canvas, config: avatarConfig });
+      setAvatarResult(result);
+      downloadBlob(result.blob, result.filename);
+    } catch (caught) {
+      setAvatarError(caught instanceof Error ? caught.message : copy.errors.generic);
+    }
+  }
+
+  function readAvatarImageFile(file?: File | null) {
+    if (!file) {
+      return;
+    }
+
+    setAvatarImageName(file.name);
+    setAvatarError("");
+    setAvatarResult(null);
+
+    if (!file.type.startsWith("image/")) {
+      setAvatarImageName("");
+      setAvatarError("请选择图片文件。");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        setAvatarError("头像图片读取失败。");
+        return;
+      }
+
+      setAvatarConfig((current) => ({
+        ...current,
+        imageSrc: reader.result as string,
+        imageScale: current.imageScale ?? 1,
+        imageOffsetX: current.imageOffsetX ?? 0,
+        imageOffsetY: current.imageOffsetY ?? 0,
+      }));
+    };
+    reader.onerror = () => {
+      setAvatarError("头像图片读取失败。");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleAvatarDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleAvatarDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    readAvatarImageFile(event.dataTransfer.files[0]);
+  }
+
+  function handleAvatarPaste(event: ClipboardEvent<HTMLDivElement>) {
+    readAvatarImageFile(
+      Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/")),
+    );
+  }
+
   function startRecording() {
     setRecordingStartStatuses(cloneStatuses(statuses));
     setRecordingEvents([]);
@@ -292,6 +444,7 @@ function App() {
         animationFrameRef.current = null;
       }
 
+      setActivePopEventId(null);
       const nextStatuses = setStatusValue(statuses, statusId, value);
       setStatuses(nextStatuses);
       setDisplayStatuses(cloneStatuses(nextStatuses));
@@ -313,6 +466,7 @@ function App() {
       animationFrameRef.current = null;
     }
 
+    setActivePopEventId(null);
     const resetStatuses = cloneStatuses(initialStatuses);
     setStatuses(resetStatuses);
     setDisplayStatuses(cloneStatuses(resetStatuses));
@@ -321,12 +475,24 @@ function App() {
     setDeltaInput("+5");
     setExportScope("single");
     setExportSource("current");
+    setAvatarConfig({
+      mood: "happy",
+      size: 220,
+      label: "阿年",
+      tagline: "PLAYER HUD",
+      imageScale: 1,
+      imageOffsetX: 0,
+      imageOffsetY: 0,
+    });
+    setAvatarImageName("");
     setRecordingStartStatuses(null);
     setRecordingEvents([]);
     setConfirmedRecordingEvents([]);
     setError("");
     setExportError("");
     setExportResult(null);
+    setAvatarError("");
+    setAvatarResult(null);
   }
 
   return (
@@ -352,7 +518,7 @@ function App() {
                 ))}
               </select>
             </label>
-            <div className="canvas-size">1080 x 640</div>
+            <div className="canvas-size">1080 x 960</div>
           </div>
         </div>
 
@@ -365,8 +531,16 @@ function App() {
                 status={status}
                 isActive={lastEvent?.statusId === status.id}
                 copy={copy}
+                activeEvent={lastEvent}
+                activePopEventId={activePopEventId}
               />
             ))}
+          </div>
+          <div className="avatar-layer">
+            <div className="avatar-layer-title" aria-hidden="true">
+              头像
+            </div>
+            <AvatarHudPanel config={avatarConfig} />
           </div>
         </div>
 
@@ -558,6 +732,139 @@ function App() {
           {exportResult ? (
             <p className="export-result">
               {copy.exportReadyLabel} ({Math.round(exportResult.blob.size / 1024)} KB)
+            </p>
+          ) : null}
+        </section>
+
+        <section className="avatar-panel" aria-label="头像素材">
+          <div className="section-title">
+            <h2>头像素材</h2>
+          </div>
+          <p className="hint">导出透明 PNG，作为独立图层放到剪辑软件里。</p>
+          <div className="avatar-controls">
+            <span className="control-label">头像图片</span>
+            <div
+              className="avatar-upload-field"
+              role="button"
+              tabIndex={0}
+              onDragOver={handleAvatarDragOver}
+              onDrop={handleAvatarDrop}
+              onPaste={handleAvatarPaste}
+            >
+              <span>上传头像</span>
+              <em>{avatarImageName || "拖拽图片到这里，或聚焦后粘贴图片"}</em>
+            </div>
+            <label htmlFor="avatar-mood">状态</label>
+            <select
+              id="avatar-mood"
+              value={avatarConfig.mood}
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  mood: event.target.value as AvatarMood,
+                }))
+              }
+            >
+              {avatarMoodOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="avatar-size">大小</label>
+            <input
+              id="avatar-size"
+              type="range"
+              min={160}
+              max={320}
+              step={10}
+              value={avatarConfig.size}
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  size: Number(event.target.value),
+                }))
+              }
+            />
+            <label htmlFor="avatarScale">头像放缩</label>
+            <input
+              id="avatarScale"
+              type="range"
+              min={1}
+              max={2.4}
+              step={0.05}
+              value={avatarConfig.imageScale ?? 1}
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  imageScale: Number(event.target.value),
+                }))
+              }
+            />
+            <label htmlFor="avatarOffsetX">左右裁剪</label>
+            <input
+              id="avatarOffsetX"
+              type="range"
+              min={-35}
+              max={35}
+              step={1}
+              value={avatarConfig.imageOffsetX ?? 0}
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  imageOffsetX: Number(event.target.value),
+                }))
+              }
+            />
+            <label htmlFor="avatarOffsetY">上下裁剪</label>
+            <input
+              id="avatarOffsetY"
+              type="range"
+              min={-35}
+              max={35}
+              step={1}
+              value={avatarConfig.imageOffsetY ?? 0}
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  imageOffsetY: Number(event.target.value),
+                }))
+              }
+            />
+            <label htmlFor="avatar-label">名称</label>
+            <input
+              id="avatar-label"
+              value={avatarConfig.label}
+              autoComplete="off"
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  label: event.target.value,
+                }))
+              }
+            />
+            <label htmlFor="avatar-tagline">标识文字</label>
+            <input
+              id="avatar-tagline"
+              value={avatarConfig.tagline}
+              autoComplete="off"
+              onChange={(event) =>
+                setAvatarConfig((current) => ({
+                  ...current,
+                  tagline: event.target.value,
+                }))
+              }
+            />
+          </div>
+          <button type="button" onClick={handleAvatarExport}>
+            导出 PNG
+          </button>
+          <p className="form-error" role="alert">
+            {avatarError}
+          </p>
+          {avatarResult ? (
+            <p className="export-result">
+              已生成 buffpop-avatar.png ({Math.round(avatarResult.blob.size / 1024)} KB)
             </p>
           ) : null}
         </section>

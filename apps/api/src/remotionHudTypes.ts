@@ -20,6 +20,7 @@ export type RemotionHudPreset = {
   height: number;
   fps: number;
   durationMs: number;
+  leadInMs?: number;
 };
 
 export type RemotionHudEvent = {
@@ -27,6 +28,7 @@ export type RemotionHudEvent = {
   from: number;
   to: number;
   delta: number;
+  deltaLabel?: string;
 };
 
 export type RemotionHudProps = Record<string, unknown> & {
@@ -37,8 +39,10 @@ export type RemotionHudProps = Record<string, unknown> & {
   preset: RemotionHudPreset;
 };
 
-export function getRemotionDurationInFrames(preset: Pick<RemotionHudPreset, "fps" | "durationMs">) {
-  return Math.max(1, Math.round((preset.fps * preset.durationMs) / 1000));
+export function getRemotionDurationInFrames(
+  preset: Pick<RemotionHudPreset, "fps" | "durationMs" | "leadInMs">,
+) {
+  return Math.max(1, Math.round((preset.fps * (preset.durationMs + (preset.leadInMs ?? 0))) / 1000));
 }
 
 export const defaultRemotionHudProps: RemotionHudProps = {
@@ -64,6 +68,7 @@ export const defaultRemotionHudProps: RemotionHudProps = {
     from: 80,
     to: 85,
     delta: 5,
+    deltaLabel: "+5",
   },
   events: [
     {
@@ -71,6 +76,7 @@ export const defaultRemotionHudProps: RemotionHudProps = {
       from: 80,
       to: 85,
       delta: 5,
+      deltaLabel: "+5",
     },
   ],
   preset: {
@@ -78,5 +84,6 @@ export const defaultRemotionHudProps: RemotionHudProps = {
     height: 1920,
     fps: 60,
     durationMs: 1600,
+    leadInMs: 220,
   },
 };

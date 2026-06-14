@@ -45,6 +45,7 @@ export function toRemotionHudProps(request: NormalizedExportRequest): RemotionHu
       height: request.preset.height,
       fps: request.preset.fps,
       durationMs: request.preset.durationMs,
+      leadInMs: request.preset.leadInMs,
     },
   };
 }

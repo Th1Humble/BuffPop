@@ -37,6 +37,7 @@ const payload: ExportRequestPayload = {
     height: 1920,
     fps: 30,
     durationMs: 1200,
+    leadInMs: 220,
     format: "webm-alpha",
   },
 };
@@ -49,6 +50,7 @@ describe("webm export", () => {
       from: 80,
       to: 85,
       statusId: "mood",
+      deltaLabel: "+5",
     });
     expect(request.scope).toBe("all");
     expect(request.statuses[0]?.customLabel).toBe("快乐值");
@@ -78,8 +80,8 @@ describe("webm export", () => {
     });
 
     expect(request.events).toEqual([
-      { statusId: "mood", from: 80, to: 85, delta: 5 },
-      { statusId: "fatigue", from: 25, to: 30, delta: 5 },
+      { statusId: "mood", from: 80, to: 85, delta: 5, deltaLabel: "+5" },
+      { statusId: "fatigue", from: 25, to: 30, delta: 5, deltaLabel: "+5" },
     ]);
     expect(request.event).toMatchObject({ statusId: "mood", from: 80, to: 85 });
   });

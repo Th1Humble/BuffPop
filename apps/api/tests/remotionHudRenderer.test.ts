@@ -36,6 +36,7 @@ const payload: ExportRequestPayload = {
     height: 1920,
     fps: 30,
     durationMs: 1200,
+    leadInMs: 220,
     format: "mov-prores-alpha",
   },
 };
@@ -50,7 +51,7 @@ describe("Remotion HUD renderer", () => {
       width: 1080,
       height: 1920,
       fps: 30,
-      durationInFrames: 36,
+      durationInFrames: 43,
     });
   });
 
@@ -72,7 +73,9 @@ describe("Remotion HUD renderer", () => {
     });
     expect(options.composition.id).toBe("BuffPopOverlay");
     expect(options.inputProps?.event).toMatchObject({ from: 80, to: 85 });
-    expect(options.inputProps?.events).toEqual([{ statusId: "mood", from: 80, to: 85, delta: 5 }]);
+    expect(options.inputProps?.events).toEqual([
+      { statusId: "mood", from: 80, to: 85, delta: 5, deltaLabel: "+5" },
+    ]);
     expect(options.inputProps?.statuses[0]?.iconSteps?.[0]).toMatchObject({
       maxPercent: 0,
       icon: expect.stringContaining("openmoji"),

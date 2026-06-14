@@ -34,17 +34,48 @@ export type ExportResult = {
 
 export type ExportScope = "single" | "all";
 export type ExportSource = "current" | "recording";
+export type AvatarMood = "happy" | "calm" | "tired" | "hungry";
+
+export type AvatarExportConfig = {
+  mood: AvatarMood;
+  size: number;
+  label: string;
+  tagline?: string;
+  imageSrc?: string;
+  imageScale?: number;
+  imageOffsetX?: number;
+  imageOffsetY?: number;
+};
 
 type ExportFetcher = typeof fetch;
+type LoadedAvatarImage = CanvasImageSource & {
+  naturalWidth?: number;
+  naturalHeight?: number;
+  videoWidth?: number;
+  videoHeight?: number;
+  width?: number;
+  height?: number;
+};
+type AvatarImageLoader = (src: string) => Promise<LoadedAvatarImage>;
 
 const exportPreset: ExportPreset = defaultExportPreset;
 const singleExportPreset: ExportPreset = {
   ...defaultExportPreset,
-  height: 260,
+  height: 420,
 };
 const allExportPreset: ExportPreset = {
   ...defaultExportPreset,
-  height: 640,
+  height: 960,
+};
+const avatarExportPreset = {
+  width: 1080,
+  height: 960,
+};
+const avatarMoodMap: Record<AvatarMood, { symbol: string; color: string; accent: string }> = {
+  happy: { symbol: "😄", color: "#ffcf70", accent: "#ff4f92" },
+  calm: { symbol: "🙂", color: "#8ddfc7", accent: "#2f9f83" },
+  tired: { symbol: "😴", color: "#b6bcff", accent: "#6f7dff" },
+  hungry: { symbol: "😋", color: "#f4a62a", accent: "#d66c28" },
 };
 
 const webmMimeTypes = [
@@ -77,6 +108,14 @@ export function presetForExportScope(scope: ExportScope): ExportPreset {
 export function getFrameStatusValue(event: StatusEvent, progress: number): number {
   const clampedProgress = clampProgress(progress);
   return event.from + (event.to - event.from) * clampedProgress;
+}
+
+export function formatDeltaBadge(delta: number): string {
+  if (delta === 0) {
+    return "";
+  }
+
+  return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
 export function createExportPlan({
@@ -274,6 +313,203 @@ export function renderExportFrame({
   });
 }
 
+function fillCircle(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  fillStyle: string | CanvasGradient,
+) {
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fillStyle = fillStyle;
+  context.fill();
+}
+
+function loadAvatarImage(src: string): Promise<LoadedAvatarImage> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Avatar image failed to load."));
+    image.src = src;
+  });
+}
+
+function getAvatarImageSize(image: LoadedAvatarImage): { width: number; height: number } {
+  const width =
+    image.naturalWidth || image.videoWidth || (typeof image.width === "number" ? image.width : 0);
+  const height =
+    image.naturalHeight ||
+    image.videoHeight ||
+    (typeof image.height === "number" ? image.height : 0);
+
+  return {
+    width: width > 0 ? width : 1,
+    height: height > 0 ? height : 1,
+  };
+}
+
+function drawCoverImage({
+  context,
+  image,
+  x,
+  y,
+  width,
+  height,
+  scale = 1,
+  offsetX = 0,
+  offsetY = 0,
+}: {
+  context: CanvasRenderingContext2D;
+  image: LoadedAvatarImage;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scale?: number;
+  offsetX?: number;
+  offsetY?: number;
+}) {
+  const source = getAvatarImageSize(image);
+  const coverScale = Math.max(width / source.width, height / source.height);
+  const sourceWidth = width / coverScale;
+  const sourceHeight = height / coverScale;
+  const sourceX = (source.width - sourceWidth) / 2;
+  const sourceY = (source.height - sourceHeight) / 2;
+  const imageScale = Math.min(Math.max(scale, 1), 2.4);
+  const scaledWidth = width * imageScale;
+  const scaledHeight = height * imageScale;
+  const destinationX = x - (scaledWidth - width) / 2 + (width * offsetX) / 100;
+  const destinationY = y - (scaledHeight - height) / 2 + (height * offsetY) / 100;
+
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    destinationX,
+    destinationY,
+    scaledWidth,
+    scaledHeight,
+  );
+}
+
+export async function exportAvatarToPng({
+  canvas,
+  config,
+  imageLoader = loadAvatarImage,
+}: {
+  canvas: HTMLCanvasElement;
+  config: AvatarExportConfig;
+  imageLoader?: AvatarImageLoader;
+}): Promise<ExportResult> {
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Canvas 2D context is unavailable.");
+  }
+
+  const mood = avatarMoodMap[config.mood] ?? avatarMoodMap.happy;
+  const { width, height } = avatarExportPreset;
+  const portraitSize = Math.min(Math.max(Math.round(config.size), 160), 320);
+  const panelWidth = 936;
+  const panelHeight = 190;
+  const panelX = 72;
+  const panelY = 650;
+  const portraitX = panelX + 34;
+  const portraitY = panelY + 28;
+  const portraitCenterX = portraitX + 62;
+  const portraitCenterY = portraitY + 62;
+
+  canvas.width = width;
+  canvas.height = height;
+  context.clearRect(0, 0, width, height);
+  context.save();
+
+  const glow = context.createRadialGradient(
+    portraitCenterX,
+    portraitCenterY,
+    18,
+    portraitCenterX,
+    portraitCenterY,
+    portraitSize * 0.58,
+  );
+  glow.addColorStop(0, `${mood.color}ee`);
+  glow.addColorStop(1, `${mood.accent}00`);
+  fillCircle(context, portraitCenterX, portraitCenterY, portraitSize * 0.44, glow);
+
+  getRoundedRectPath(context, panelX, panelY, panelWidth, panelHeight, 22);
+  context.fillStyle = "rgba(16,16,17,0.82)";
+  context.fill();
+  context.strokeStyle = mood.accent;
+  context.lineWidth = 3;
+  context.stroke();
+
+  getRoundedRectPath(context, portraitX, portraitY, 124, 124, 18);
+  context.fillStyle = mood.color;
+  context.fill();
+
+  if (config.imageSrc) {
+    const image = await imageLoader(config.imageSrc);
+
+    context.save();
+    getRoundedRectPath(context, portraitX, portraitY, 124, 124, 18);
+    context.clip();
+    drawCoverImage({
+      context,
+      image,
+      x: portraitX,
+      y: portraitY,
+      width: 124,
+      height: 124,
+      scale: config.imageScale,
+      offsetX: config.imageOffsetX,
+      offsetY: config.imageOffsetY,
+    });
+    context.restore();
+  } else {
+    context.fillStyle = "#171514";
+    context.font = "64px \"Apple Color Emoji\", \"Segoe UI Emoji\", sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(mood.symbol, portraitCenterX, portraitCenterY + 2);
+  }
+
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  context.fillStyle = "rgba(255, 250, 242, 0.94)";
+  context.font = "900 42px Inter, system-ui, sans-serif";
+  context.fillText(config.label.trim() || "角色", 218, 726);
+
+  const tagline = config.tagline?.trim() || "PLAYER HUD";
+
+  if (tagline.length > 0) {
+    context.fillStyle = "rgba(255, 250, 242, 0.62)";
+    context.font = "800 18px Inter, system-ui, sans-serif";
+    context.fillText(tagline, 218, 786);
+  }
+
+  context.restore();
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (!nextBlob) {
+        reject(new Error("Avatar PNG export failed."));
+        return;
+      }
+
+      resolve(nextBlob);
+    }, "image/png");
+  });
+
+  return {
+    blob,
+    filename: "buffpop-avatar.png",
+    mimeType: blob.type || "image/png",
+  };
+}
+
 function waitForTimeout(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -339,6 +575,7 @@ export async function exportPlanToVideo({
         from: event.from,
         to: event.to,
         delta: event.appliedDelta,
+        deltaLabel: formatDeltaBadge(event.appliedDelta),
       })),
       preset,
     }),

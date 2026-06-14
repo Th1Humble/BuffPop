@@ -32,6 +32,7 @@ export type ExportRequestPayload = {
     height: number;
     fps: number;
     durationMs: number;
+    leadInMs?: number;
     format: SupportedExportFormat;
   };
 };
@@ -41,6 +42,7 @@ export type ExportEventPayload = {
   from: number;
   to: number;
   delta: number;
+  deltaLabel?: string;
 };
 
 export type NormalizedExportRequest = ExportRequestPayload & {
@@ -69,6 +71,14 @@ function exportExtension(format: SupportedExportFormat): "mov" | "webm" {
   return format === "mov-prores-alpha" ? "mov" : "webm";
 }
 
+function formatDeltaBadge(delta: number): string {
+  if (delta === 0) {
+    return "";
+  }
+
+  return delta > 0 ? `+${delta}` : `${delta}`;
+}
+
 export function exportMimeType(format: SupportedExportFormat): "video/quicktime" | "video/webm" {
   return format === "mov-prores-alpha" ? "video/quicktime" : "video/webm";
 }
@@ -87,6 +97,9 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
   assertFiniteNumber(payload.preset.height, "height");
   assertFiniteNumber(payload.preset.fps, "fps");
   assertFiniteNumber(payload.preset.durationMs, "durationMs");
+  if (payload.preset.leadInMs !== undefined) {
+    assertFiniteNumber(payload.preset.leadInMs, "leadInMs");
+  }
 
   if (payload.preset.format !== "webm-alpha" && payload.preset.format !== "mov-prores-alpha") {
     throw new Error("Only MOV ProRes alpha and WebM alpha export are supported.");
@@ -139,6 +152,7 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
     from,
     to,
     delta: to - from,
+    deltaLabel: formatDeltaBadge(to - from),
   };
   const events = Array.isArray(payload.events) && payload.events.length > 0
     ? payload.events.map((event) => {
@@ -160,6 +174,7 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
           from: fromValue,
           to: toValue,
           delta: toValue - fromValue,
+          deltaLabel: formatDeltaBadge(toValue - fromValue),
         };
       })
     : [fallbackEvent];
@@ -177,6 +192,7 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
       height: Math.round(payload.preset.height),
       fps: Math.round(payload.preset.fps),
       durationMs: Math.round(payload.preset.durationMs),
+      leadInMs: Math.max(0, Math.round(payload.preset.leadInMs ?? 0)),
     },
     event: events[0] ?? fallbackEvent,
   };
