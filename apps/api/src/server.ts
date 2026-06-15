@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { extname, join, basename } from "node:path";
 import {
   exportFilename,
   exportMimeType,
@@ -23,6 +23,17 @@ export type ApiServerDependencies = {
   downloadsDirectory?: string;
   renderVideo?: (payload: NormalizedExportRequest) => Promise<Buffer>;
 };
+
+function logApiEvent(event: string, fields: Record<string, unknown> = {}) {
+  console.log(
+    JSON.stringify({
+      event,
+      service: "buffpop-api",
+      timestamp: new Date().toISOString(),
+      ...fields,
+    }),
+  );
+}
 
 export function createHealthPayload(): HealthPayload {
   return {
@@ -48,6 +59,17 @@ function getDownloadsDirectory(directory = process.env.BUFFPOP_DOWNLOAD_DIR): st
   return directory?.trim() || join(homedir(), "Downloads", "BuffPop");
 }
 
+function filenameCandidate(filename: string, index: number): string {
+  if (index === 0) {
+    return filename;
+  }
+
+  const extension = extname(filename);
+  const name = basename(filename, extension);
+
+  return `${name}-${index}${extension}`;
+}
+
 async function saveVideoToDownloads({
   buffer,
   filename,
@@ -58,12 +80,26 @@ async function saveVideoToDownloads({
   downloadsDirectory?: string;
 }): Promise<string> {
   const directory = getDownloadsDirectory(downloadsDirectory);
-  const outputPath = join(directory, filename);
 
   await mkdir(directory, { recursive: true });
-  await writeFile(outputPath, buffer);
 
-  return outputPath;
+  for (let index = 0; index < 1000; index += 1) {
+    const outputPath = join(directory, filenameCandidate(filename, index));
+
+    try {
+      await writeFile(outputPath, buffer, { flag: "wx" });
+
+      return outputPath;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(`Could not find an available filename for ${filename}.`);
 }
 
 function writeVideo(
@@ -115,8 +151,19 @@ async function handleRequest(
   response: ServerResponse,
   dependencies: ApiServerDependencies = {},
 ) {
+  const requestStartedAt = Date.now();
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const videoRenderer = dependencies.renderVideo ?? renderVideo;
+  const route = `${request.method ?? "UNKNOWN"} ${url.pathname}`;
+
+  logApiEvent("request:start", { route });
+  response.on("finish", () => {
+    logApiEvent("request:finish", {
+      route,
+      statusCode: response.statusCode,
+      durationMs: Date.now() - requestStartedAt,
+    });
+  });
 
   if (request.method === "OPTIONS") {
     writeJson(response, 204, {});
@@ -138,7 +185,19 @@ async function handleRequest(
           format: "webm-alpha",
         },
       });
+      logApiEvent("export:render:start", {
+        format: requestPayload.preset.format,
+        kind: requestPayload.kind,
+        width: requestPayload.preset.width,
+        height: requestPayload.preset.height,
+        fps: requestPayload.preset.fps,
+        durationMs: requestPayload.preset.durationMs,
+      });
       const buffer = await videoRenderer(requestPayload);
+      logApiEvent("export:render:finish", {
+        bytes: buffer.byteLength,
+        elapsedMs: Date.now() - requestStartedAt,
+      });
       const filename = exportFilename("webm-alpha", requestPayload.kind);
       const savedPath = await saveVideoToDownloads({
         buffer,
@@ -159,7 +218,19 @@ async function handleRequest(
     try {
       const payload = (await readJsonBody(request)) as ExportRequestPayload;
       const requestPayload = normalizeExportRequest(payload);
+      logApiEvent("export:render:start", {
+        format: requestPayload.preset.format,
+        kind: requestPayload.kind,
+        width: requestPayload.preset.width,
+        height: requestPayload.preset.height,
+        fps: requestPayload.preset.fps,
+        durationMs: requestPayload.preset.durationMs,
+      });
       const buffer = await videoRenderer(requestPayload);
+      logApiEvent("export:render:finish", {
+        bytes: buffer.byteLength,
+        elapsedMs: Date.now() - requestStartedAt,
+      });
       const filename = exportFilename(requestPayload.preset.format, requestPayload.kind);
       const savedPath = await saveVideoToDownloads({
         buffer,

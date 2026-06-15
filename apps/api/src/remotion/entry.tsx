@@ -325,6 +325,17 @@ function renderValueOf(status: RemotionHudStatus): number {
   return status.renderValue ?? status.value;
 }
 
+function logBrowserEvent(event: string, fields: Record<string, unknown> = {}) {
+  console.log(
+    JSON.stringify({
+      event,
+      service: "buffpop-remotion-browser",
+      timestamp: new Date().toISOString(),
+      ...fields,
+    }),
+  );
+}
+
 function getStatusIcon(status: RemotionHudStatus): string | undefined {
   const steps = status.iconSteps ?? [];
   const percent = status.max > 0 ? (renderValueOf(status) / status.max) * 100 : 0;
@@ -481,6 +492,7 @@ function HudRow({
   const color = status.color;
   const popState = deltaPopState(progress);
   const deltaLabel = event?.statusId === status.id && progress > 0 ? event.deltaLabel : "";
+  const icon = getStatusIcon(status);
 
   return (
     <article
@@ -501,8 +513,23 @@ function HudRow({
       }
     >
       <div className="badge">
-        {getStatusIcon(status) ? (
-          <Img src={getStatusIcon(status) ?? ""} alt="" />
+        {icon ? (
+          <Img
+            src={icon}
+            alt=""
+            onLoad={() => {
+              logBrowserEvent("remotion:icon:load", {
+                statusId: status.id,
+                icon,
+              });
+            }}
+            onError={() => {
+              logBrowserEvent("remotion:icon:error", {
+                statusId: status.id,
+                icon,
+              });
+            }}
+          />
         ) : (
           <span>{status.icon ?? "•"}</span>
         )}

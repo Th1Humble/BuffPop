@@ -25,6 +25,17 @@ export type RemotionRenderDependencies = {
   }>;
 };
 
+function logRemotionEvent(event: string, fields: Record<string, unknown> = {}) {
+  console.log(
+    JSON.stringify({
+      event,
+      service: "buffpop-api",
+      timestamp: new Date().toISOString(),
+      ...fields,
+    }),
+  );
+}
+
 function sourceDirectory(): string {
   return dirname(fileURLToPath(import.meta.url));
 }
@@ -166,14 +177,57 @@ export async function renderWithRemotion(
   const renderMedia = dependencies.renderMedia ?? remotionRenderMedia;
 
   try {
+    const bundleStartedAt = Date.now();
+    logRemotionEvent("remotion:bundle:start", {
+      entryPoint: getRemotionEntryPoint(),
+    });
     const serveUrl = await bundle(buildRemotionBundleOptions());
+    logRemotionEvent("remotion:bundle:finish", {
+      durationMs: Date.now() - bundleStartedAt,
+      serveUrl,
+    });
+
+    const renderStartedAt = Date.now();
+    logRemotionEvent("remotion:render:start", {
+      format: request.preset.format,
+      kind: request.kind,
+      width: request.preset.width,
+      height: request.preset.height,
+      fps: request.preset.fps,
+      durationMs: request.preset.durationMs,
+    });
     const result = await renderMedia(
-      buildRemotionRenderOptions({
-        request,
-        serveUrl,
-        outputLocation,
-      }),
+      {
+        ...buildRemotionRenderOptions({
+          request,
+          serveUrl,
+          outputLocation,
+        }),
+        onBrowserLog: (log) => {
+          logRemotionEvent("remotion:browser:log", {
+            type: log.type,
+            text: log.text,
+          });
+        },
+        onProgress: (progress) => {
+          logRemotionEvent("remotion:render:progress", {
+            encodedFrames: progress.encodedFrames,
+            progress: Math.round(progress.progress * 1000) / 1000,
+            renderedFrames: progress.renderedFrames,
+            stitchStage: progress.stitchStage,
+          });
+        },
+        onStart: (data) => {
+          logRemotionEvent("remotion:render:on-start", data);
+        },
+      },
     );
+    logRemotionEvent("remotion:render:finish", {
+      durationMs: Date.now() - renderStartedAt,
+      contentType: result.contentType,
+      bytes: result.buffer?.byteLength ?? null,
+      outputLocation,
+    });
 
     return result.buffer ?? (await readFile(outputLocation));
   } finally {
