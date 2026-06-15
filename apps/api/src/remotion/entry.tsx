@@ -10,10 +10,13 @@ import {
 } from "remotion";
 import {
   buffPopCompositionId,
+  buffPopQuestCompositionId,
   defaultRemotionHudProps,
+  defaultRemotionQuestProps,
   getRemotionDurationInFrames,
   type RemotionHudProps,
   type RemotionHudStatus,
+  type RemotionQuestProps,
 } from "../remotionHudTypes.js";
 
 const hudStyles = `
@@ -229,6 +232,87 @@ const hudStyles = `
   }
 `;
 
+const questStyles = `
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    background: transparent;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  }
+
+  .quest-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: #fffaf2;
+    padding: 48px 72px;
+  }
+
+  .quest-notice {
+    --quest-accent: #ffcf70;
+    position: relative;
+    display: grid;
+    gap: 10px;
+    width: 100%;
+    overflow: hidden;
+    border-left: 6px solid var(--quest-accent);
+    border-radius: 0 12px 12px 0;
+    padding: 28px 34px 30px 38px;
+    background: linear-gradient(90deg, rgba(10, 10, 11, 0.88), rgba(10, 10, 11, 0.56) 62%, transparent);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.18);
+    opacity: var(--quest-opacity);
+    transform: translateX(var(--quest-x)) scale(var(--quest-scale));
+  }
+
+  .quest-notice::before {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--quest-accent), transparent 72%), transparent 44%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 52%);
+    content: "";
+    pointer-events: none;
+  }
+
+  .quest-notice--active {
+    --quest-accent: #8ddfc7;
+  }
+
+  .quest-notice--completed {
+    --quest-accent: #ffd98d;
+  }
+
+  .quest-notice--failed {
+    --quest-accent: #ff7070;
+  }
+
+  .quest-label {
+    position: relative;
+    color: var(--quest-accent);
+    font-size: 28px;
+    font-weight: 950;
+    line-height: 1;
+    text-shadow: 0 2px 12px color-mix(in srgb, var(--quest-accent), transparent 52%);
+  }
+
+  .quest-title {
+    position: relative;
+    overflow: hidden;
+    color: rgba(255, 250, 242, 0.96);
+    font-size: 58px;
+    font-weight: 950;
+    line-height: 1.08;
+    text-shadow: 0 4px 18px rgba(0, 0, 0, 0.42);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+`;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -351,6 +435,39 @@ function getAnimationProgress({
   return clamp((elapsedMs - leadInMs) / durationMs, 0, 1);
 }
 
+function getQuestMotion(progress: number) {
+  const clampedProgress = clamp(progress, 0, 1);
+  const x = interpolate(
+    clampedProgress,
+    [0, 0.18, 0.78, 1],
+    [-42, 0, 0, -48],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    },
+  );
+  const opacity = interpolate(
+    clampedProgress,
+    [0, 0.18, 0.78, 1],
+    [0, 1, 1, 0],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    },
+  );
+  const scale = interpolate(
+    clampedProgress,
+    [0, 0.18, 0.78, 1],
+    [0.96, 1, 1, 0.98],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    },
+  );
+
+  return { x, opacity, scale };
+}
+
 function HudRow({
   status,
   event,
@@ -447,19 +564,63 @@ function BuffPopOverlay(props: RemotionHudProps) {
   );
 }
 
+function BuffPopQuestOverlay(props: RemotionQuestProps) {
+  const frame = useCurrentFrame();
+  const config = useVideoConfig();
+  const progress = getAnimationProgress({
+    frame,
+    fps: config.fps,
+    durationMs: props.preset.durationMs,
+    leadInMs: props.preset.leadInMs,
+  });
+  const motion = getQuestMotion(progress);
+
+  return (
+    <AbsoluteFill className="quest-stage">
+      <style>{questStyles}</style>
+      <section
+        className={`quest-notice quest-notice--${props.quest.state}`}
+        style={
+          {
+            "--quest-x": `${motion.x}px`,
+            "--quest-opacity": motion.opacity,
+            "--quest-scale": motion.scale,
+          } as React.CSSProperties
+        }
+      >
+        <span className="quest-label">{props.quest.label}</span>
+        <strong className="quest-title">{props.quest.title}</strong>
+      </section>
+    </AbsoluteFill>
+  );
+}
+
 function RemotionRoot() {
   return (
-    <Composition
-      id={buffPopCompositionId}
-      component={BuffPopOverlay}
-      defaultProps={defaultRemotionHudProps}
-      calculateMetadata={({ props }) => ({
-        width: props.preset.width,
-        height: props.preset.height,
-        fps: props.preset.fps,
-        durationInFrames: getRemotionDurationInFrames(props.preset),
-      })}
-    />
+    <>
+      <Composition
+        id={buffPopCompositionId}
+        component={BuffPopOverlay}
+        defaultProps={defaultRemotionHudProps}
+        calculateMetadata={({ props }) => ({
+          width: props.preset.width,
+          height: props.preset.height,
+          fps: props.preset.fps,
+          durationInFrames: getRemotionDurationInFrames(props.preset),
+        })}
+      />
+      <Composition
+        id={buffPopQuestCompositionId}
+        component={BuffPopQuestOverlay}
+        defaultProps={defaultRemotionQuestProps}
+        calculateMetadata={({ props }) => ({
+          width: props.preset.width,
+          height: props.preset.height,
+          fps: props.preset.fps,
+          durationInFrames: getRemotionDurationInFrames(props.preset),
+        })}
+      />
+    </>
   );
 }
 

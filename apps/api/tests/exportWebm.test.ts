@@ -88,9 +88,39 @@ describe("webm export", () => {
 
   it("returns export names and MIME types for Remotion outputs", () => {
     expect(exportFilename("mov-prores-alpha")).toBe("buffpop-overlay.mov");
+    expect(exportFilename("mov-prores-alpha", "quest")).toBe("buffpop-quest.mov");
     expect(exportMimeType("mov-prores-alpha")).toBe("video/quicktime");
     expect(exportFilename("webm-alpha")).toBe("buffpop-overlay.webm");
+    expect(exportFilename("webm-alpha", "quest")).toBe("buffpop-quest.webm");
     expect(exportMimeType("webm-alpha")).toBe("video/webm");
+  });
+
+  it("normalizes quest HUD export requests", () => {
+    const request = normalizeExportRequest({
+      kind: "quest",
+      quest: {
+        title: "剪完昨晚 Vlog",
+        label: "MISSION START",
+        state: "start",
+      },
+      preset: {
+        width: 1080,
+        height: 360,
+        fps: 60,
+        durationMs: 1800,
+        leadInMs: 0,
+        format: "mov-prores-alpha",
+      },
+    });
+
+    expect(request.kind).toBe("quest");
+    expect(request.quest).toMatchObject({
+      title: "剪完昨晚 Vlog",
+      label: "MISSION START",
+      state: "start",
+    });
+    expect(request.statuses).toEqual([]);
+    expect(request.preset.height).toBe(360);
   });
 
   it("rejects an unknown status id", () => {

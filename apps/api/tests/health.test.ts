@@ -1,6 +1,10 @@
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
-import { createApiServer, createHealthPayload } from "../src/server.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApiServer, createHealthPayload, type ApiServerDependencies } from "../src/server.js";
+import type { NormalizedExportRequest } from "../src/exportWebm.js";
 
 const openServers: ReturnType<typeof createApiServer>[] = [];
 
@@ -56,5 +60,59 @@ describe("api health", () => {
       runtime: "Node.js + TypeScript",
       status: "ok",
     });
+  });
+
+  it("saves rendered quest videos to a local downloads directory and reports the path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "buffpop-api-downloads-"));
+    const renderedBuffer = Buffer.from("quest-video");
+    const renderVideo = vi.fn(async (_request: NormalizedExportRequest) => renderedBuffer);
+    const dependencies: ApiServerDependencies = {
+      downloadsDirectory: directory,
+      renderVideo,
+    };
+    const server = createApiServer(dependencies);
+    openServers.push(server);
+    const port = await listen(server);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/export/video`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          kind: "quest",
+          quest: {
+            title: "剪完昨晚 Vlog",
+            label: "MISSION START",
+            state: "start",
+          },
+          preset: {
+            width: 1080,
+            height: 360,
+            fps: 60,
+            durationMs: 1800,
+            leadInMs: 0,
+            format: "mov-prores-alpha",
+          },
+        }),
+      });
+
+      const savedPath = decodeURIComponent(response.headers.get("x-buffpop-saved-path") ?? "");
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-disposition")).toContain("buffpop-quest.mov");
+      expect(savedPath).toBe(join(directory, "buffpop-quest.mov"));
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(renderedBuffer);
+      expect(await readFile(savedPath ?? "")).toEqual(renderedBuffer);
+      expect(renderVideo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "quest",
+          preset: expect.objectContaining({ format: "mov-prores-alpha" }),
+        }),
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

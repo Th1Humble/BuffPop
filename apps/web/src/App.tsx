@@ -8,7 +8,9 @@ import {
   downloadBlob,
   exportAvatarToPng,
   exportPlanToVideo,
+  exportQuestToVideo,
   formatDeltaBadge,
+  shouldUseBrowserDownload,
   type ExportSource,
   type ExportScope,
   type ExportResult,
@@ -48,6 +50,20 @@ const avatarMoodOptions: Array<{ id: AvatarMood; label: string; symbol: string }
 ];
 type DisplayStatusItem = StatusItem & {
   renderValue?: number;
+};
+type QuestState = "start" | "active" | "completed" | "failed";
+
+type QuestConfig = {
+  title: string;
+  state: QuestState;
+  holdSeconds: number;
+};
+
+const questStateCopy: Record<QuestState, { label: string }> = {
+  start: { label: "MISSION START" },
+  active: { label: "MISSION ACTIVE" },
+  completed: { label: "MISSION COMPLETE" },
+  failed: { label: "MISSION FAILED" },
 };
 
 function renderValueOf(status: DisplayStatusItem): number {
@@ -152,6 +168,32 @@ function AvatarHudPanel({ config }: { config: AvatarExportConfig }) {
   );
 }
 
+function QuestHudPanel({
+  config,
+  animationKey,
+}: {
+  config: QuestConfig;
+  animationKey: number;
+}) {
+  const state = questStateCopy[config.state];
+  const questDurationSeconds = Math.min(Math.max(config.holdSeconds, 0.6), 5);
+  const questStyle = {
+    "--quest-duration": `${questDurationSeconds}s`,
+  } as CSSProperties;
+
+  return (
+    <section
+      className={`quest-hud-panel quest-hud-panel--${config.state}`}
+      key={animationKey}
+      style={questStyle}
+      aria-label="任务 HUD"
+    >
+      <span>{state.label}</span>
+      <strong>{config.title.trim() || "未命名任务"}</strong>
+    </section>
+  );
+}
+
 function applyDisplayValue(
   statuses: StatusItem[],
   statusId: string,
@@ -197,6 +239,15 @@ function App() {
   const [avatarImageName, setAvatarImageName] = useState("");
   const [avatarResult, setAvatarResult] = useState<ExportResult | null>(null);
   const [avatarError, setAvatarError] = useState("");
+  const [questResult, setQuestResult] = useState<ExportResult | null>(null);
+  const [questError, setQuestError] = useState("");
+  const [isQuestExporting, setIsQuestExporting] = useState(false);
+  const [questConfig, setQuestConfig] = useState<QuestConfig>({
+    title: "剪完昨晚 Vlog",
+    state: "start",
+    holdSeconds: 1.8,
+  });
+  const [questAnimationKey, setQuestAnimationKey] = useState(0);
   const animationFrameRef = useRef<number | null>(null);
   const lastEvent = events[0];
   const copy = useMemo(() => getCopy(language), [language]);
@@ -316,7 +367,9 @@ function App() {
         events: exportSource === "recording" ? sourceEvents : undefined,
       });
       setExportResult(result);
-      downloadBlob(result.blob, result.filename);
+      if (shouldUseBrowserDownload(result)) {
+        downloadBlob(result.blob, result.filename);
+      }
     } catch (caught) {
       if (caught instanceof StatusEngineError) {
         setExportError(getEngineErrorMessage(copy, caught.messageKey));
@@ -340,6 +393,31 @@ function App() {
       downloadBlob(result.blob, result.filename);
     } catch (caught) {
       setAvatarError(caught instanceof Error ? caught.message : copy.errors.generic);
+    }
+  }
+
+  async function handleQuestExport() {
+    setQuestError("");
+    setQuestResult(null);
+    setIsQuestExporting(true);
+
+    try {
+      const result = await exportQuestToVideo({
+        config: {
+          title: questConfig.title.trim() || "未命名任务",
+          label: questStateCopy[questConfig.state].label,
+          state: questConfig.state,
+          holdSeconds: questConfig.holdSeconds,
+        },
+      });
+      setQuestResult(result);
+      if (shouldUseBrowserDownload(result)) {
+        downloadBlob(result.blob, result.filename);
+      }
+    } catch (caught) {
+      setQuestError(caught instanceof Error ? caught.message : copy.errors.generic);
+    } finally {
+      setIsQuestExporting(false);
     }
   }
 
@@ -393,6 +471,10 @@ function App() {
     readAvatarImageFile(
       Array.from(event.clipboardData.files).find((file) => file.type.startsWith("image/")),
     );
+  }
+
+  function replayQuestNotice() {
+    setQuestAnimationKey((current) => current + 1);
   }
 
   function startRecording() {
@@ -485,6 +567,12 @@ function App() {
       imageOffsetY: 0,
     });
     setAvatarImageName("");
+    setQuestConfig({
+      title: "剪完昨晚 Vlog",
+      state: "start",
+      holdSeconds: 1.8,
+    });
+    setQuestAnimationKey((current) => current + 1);
     setRecordingStartStatuses(null);
     setRecordingEvents([]);
     setConfirmedRecordingEvents([]);
@@ -493,6 +581,8 @@ function App() {
     setExportResult(null);
     setAvatarError("");
     setAvatarResult(null);
+    setQuestError("");
+    setQuestResult(null);
   }
 
   return (
@@ -541,6 +631,9 @@ function App() {
               头像
             </div>
             <AvatarHudPanel config={avatarConfig} />
+            <div className="quest-layer">
+              <QuestHudPanel config={questConfig} animationKey={questAnimationKey} />
+            </div>
           </div>
         </div>
 
@@ -732,6 +825,80 @@ function App() {
           {exportResult ? (
             <p className="export-result">
               {copy.exportReadyLabel} ({Math.round(exportResult.blob.size / 1024)} KB)
+              {exportResult.savedPath ? <span>{exportResult.savedPath}</span> : null}
+            </p>
+          ) : null}
+        </section>
+
+        <section className="quest-panel" aria-label="任务 HUD">
+          <div className="section-title">
+            <h2>任务 HUD</h2>
+          </div>
+          <p className="hint">给 vlog 里的某件事做一条任务事件通知。</p>
+          <div className="quest-controls">
+            <label htmlFor="quest-title">任务名称</label>
+            <input
+              id="quest-title"
+              value={questConfig.title}
+              autoComplete="off"
+              onChange={(event) =>
+                setQuestConfig((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+            />
+            <label htmlFor="quest-state">状态</label>
+            <select
+              id="quest-state"
+              value={questConfig.state}
+              onChange={(event) =>
+                setQuestConfig((current) => ({
+                  ...current,
+                  state: event.target.value as QuestState,
+                }))
+              }
+            >
+              <option value="start">任务开始</option>
+              <option value="active">进行中</option>
+              <option value="completed">任务完成</option>
+              <option value="failed">未完成</option>
+            </select>
+            <label htmlFor="quest-hold-seconds">停留秒数</label>
+            <input
+              id="quest-hold-seconds"
+              type="number"
+              min={0.6}
+              max={5}
+              step={0.1}
+              value={questConfig.holdSeconds}
+              onChange={(event) =>
+                setQuestConfig((current) => ({
+                  ...current,
+                  holdSeconds: Number(event.target.value),
+                }))
+              }
+            />
+            <div className="current-readout">
+              <span>动画</span>
+              <strong>左入停留右出</strong>
+            </div>
+          </div>
+          <div className="quest-actions">
+            <button type="button" onClick={replayQuestNotice}>
+              播放任务动画
+            </button>
+            <button type="button" onClick={handleQuestExport} disabled={isQuestExporting}>
+              {isQuestExporting ? "导出中" : "导出视频"}
+            </button>
+          </div>
+          <p className="form-error" role="alert">
+            {questError}
+          </p>
+          {questResult ? (
+            <p className="export-result">
+              已生成 buffpop-quest.mov ({Math.round(questResult.blob.size / 1024)} KB)
+              {questResult.savedPath ? <span>{questResult.savedPath}</span> : null}
             </p>
           ) : null}
         </section>

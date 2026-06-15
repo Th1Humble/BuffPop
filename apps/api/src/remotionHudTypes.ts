@@ -1,4 +1,5 @@
 export const buffPopCompositionId = "BuffPopOverlay";
+export const buffPopQuestCompositionId = "BuffPopQuestOverlay";
 
 export type RemotionHudStatus = {
   id: string;
@@ -21,6 +22,17 @@ export type RemotionHudPreset = {
   fps: number;
   durationMs: number;
   leadInMs?: number;
+};
+
+export type RemotionQuestState = "start" | "active" | "completed" | "failed";
+
+export type RemotionQuestProps = Record<string, unknown> & {
+  quest: {
+    title: string;
+    label: string;
+    state: RemotionQuestState;
+  };
+  preset: RemotionHudPreset;
 };
 
 export type RemotionHudEvent = {
@@ -85,5 +97,20 @@ export const defaultRemotionHudProps: RemotionHudProps = {
     fps: 60,
     durationMs: 1600,
     leadInMs: 220,
+  },
+};
+
+export const defaultRemotionQuestProps: RemotionQuestProps = {
+  quest: {
+    title: "剪完昨晚 Vlog",
+    label: "MISSION START",
+    state: "start",
+  },
+  preset: {
+    width: 1080,
+    height: 360,
+    fps: 60,
+    durationMs: 1800,
+    leadInMs: 0,
   },
 };

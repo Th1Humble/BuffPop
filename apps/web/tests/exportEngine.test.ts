@@ -1,18 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildExportFrames,
   chooseWebmMimeType,
   createExportPlan,
+  downloadBlob,
   exportAvatarToPng,
   exportPlanToVideo,
+  exportQuestToVideo,
   formatDeltaBadge,
   getFrameStatusValue,
   presetForExportScope,
+  shouldUseBrowserDownload,
   type AvatarExportConfig,
 } from "../src/exportEngine";
 import { applyStatusDelta, cloneStatuses, initialStatuses } from "../src/stateEngine";
 
 describe("exportEngine", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("creates a transparent vertical MOV export plan", () => {
     const plan = createExportPlan({
       statuses: cloneStatuses(initialStatuses),
@@ -212,6 +221,118 @@ describe("exportEngine", () => {
         { statusId: "fatigue", from: 25, to: 30, delta: 5, deltaLabel: "+5" },
       ],
     });
+  });
+
+  it("sends quest HUD export requests to the API", async () => {
+    const fetchCalls: unknown[] = [];
+    const fetchStub = async (...args: unknown[]) => {
+      fetchCalls.push(args);
+
+      return new Response(new Blob(["video"], { type: "video/quicktime" }), {
+        status: 200,
+        headers: {
+          "x-buffpop-saved-path": encodeURIComponent(
+            "/Users/majian81/Downloads/BuffPop/buffpop-quest.mov",
+          ),
+        },
+      });
+    };
+
+    const result = await exportQuestToVideo({
+      config: {
+        title: "剪完昨晚 Vlog",
+        label: "MISSION START",
+        state: "start",
+        holdSeconds: 1.8,
+      },
+      fetcher: fetchStub,
+    });
+
+    const [url, options] = fetchCalls[0] as [string, { body: string }];
+    expect(url).toBe("http://127.0.0.1:5190/export/video");
+    expect(JSON.parse(options.body)).toMatchObject({
+      kind: "quest",
+      quest: {
+        title: "剪完昨晚 Vlog",
+        label: "MISSION START",
+        state: "start",
+      },
+      preset: {
+        width: 1080,
+        height: 360,
+        fps: 60,
+        durationMs: 1800,
+        format: "mov-prores-alpha",
+      },
+    });
+    expect(result.filename).toBe("buffpop-quest.mov");
+    expect(result.mimeType).toBe("video/quicktime");
+    expect(result.savedPath).toBe("/Users/majian81/Downloads/BuffPop/buffpop-quest.mov");
+  });
+
+  it("keeps generated download URLs alive long enough for the browser to save them", () => {
+    vi.useFakeTimers();
+    const anchor = {
+      href: "",
+      download: "",
+      rel: "",
+      style: { display: "" },
+      click: vi.fn(),
+      remove: vi.fn(),
+    };
+    const appendChild = vi.fn();
+    const createElement = vi.fn(() => anchor);
+    const createObjectURL = vi.fn(() => "blob:buffpop-quest");
+    const revokeObjectURL = vi.fn();
+
+    vi.stubGlobal("document", {
+      createElement,
+      body: {
+        appendChild,
+      },
+    });
+    vi.stubGlobal("URL", {
+      createObjectURL,
+      revokeObjectURL,
+    });
+    vi.stubGlobal("window", {
+      setTimeout,
+    });
+
+    downloadBlob(new Blob(["video"], { type: "video/quicktime" }), "buffpop-quest.mov");
+
+    expect(createElement).toHaveBeenCalledWith("a");
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(appendChild).toHaveBeenCalledWith(anchor);
+    expect(anchor.href).toBe("blob:buffpop-quest");
+    expect(anchor.download).toBe("buffpop-quest.mov");
+    expect(anchor.rel).toBe("noopener");
+    expect(anchor.style.display).toBe("none");
+    expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(anchor.remove).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:buffpop-quest");
+  });
+
+  it("skips browser downloads when the local API already saved the file", () => {
+    expect(
+      shouldUseBrowserDownload({
+        blob: new Blob(["video"], { type: "video/quicktime" }),
+        filename: "buffpop-quest.mov",
+        mimeType: "video/quicktime",
+        savedPath: "/Users/majian81/Downloads/BuffPop/buffpop-quest.mov",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseBrowserDownload({
+        blob: new Blob(["avatar"], { type: "image/png" }),
+        filename: "buffpop-avatar.png",
+        mimeType: "image/png",
+      }),
+    ).toBe(true);
   });
 
   it("maps export scopes to compact overlay presets", () => {

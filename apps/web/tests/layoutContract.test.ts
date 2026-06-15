@@ -47,7 +47,7 @@ describe("layout contract", () => {
     expect(css).toContain("top: 5%");
     expect(css).toContain("max-height: 46%");
     expect(css).toContain(".avatar-layer");
-    expect(css).toContain("bottom: 7%");
+    expect(css).toContain(".quest-layer");
   });
 
   it("keeps the Remotion HUD stack centered in the export canvas", async () => {
@@ -114,5 +114,70 @@ describe("layout contract", () => {
     expect(css).toContain(".avatar-upload-field");
     expect(css).toContain(".avatar-upload-field:focus-visible");
     expect(css).not.toContain(".avatar-preview");
+  });
+
+  it("keeps the quest HUD as a separate overlay and editable on the current page", async () => {
+    const appSource = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+    const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+    expect(appSource).toContain("QuestHudPanel");
+    expect(appSource).toContain("quest-layer");
+    expect(appSource).toContain("quest-hud-panel");
+    expect(appSource).toContain("quest-panel");
+    expect(appSource).toContain("quest-title");
+    expect(appSource).toContain("quest-hold-seconds");
+    expect(appSource).toContain("exportQuestToVideo");
+    expect(appSource).toContain("handleQuestExport");
+    expect(appSource).toContain("questResult.savedPath");
+    expect(appSource).toContain("shouldUseBrowserDownload(result)");
+    expect(appSource).not.toContain("quest-detail");
+    expect(appSource).not.toContain("quest-reward");
+    expect(appSource).not.toContain("quest-progress");
+    expect(appSource).toContain("replayQuestNotice");
+    expect(appSource).toContain("播放任务动画");
+    expect(appSource).toContain("导出视频");
+    expect(appSource).toContain("questDurationSeconds");
+    expect(appSource).toContain("--quest-duration");
+    expect(appSource).toContain('start: { label: "MISSION START" }');
+    expect(appSource).toContain('active: { label: "MISSION ACTIVE" }');
+    expect(appSource).toContain('completed: { label: "MISSION COMPLETE" }');
+    expect(appSource).toContain('failed: { label: "MISSION FAILED" }');
+    expect(appSource).not.toContain('state: "completed"');
+
+    const hudStackStart = appSource.indexOf('<div className="hud-stack">');
+    const avatarLayerStart = appSource.indexOf('<div className="avatar-layer">');
+    const avatarPanelUse = appSource.indexOf("<AvatarHudPanel config={avatarConfig} />");
+    const questLayerStart = appSource.indexOf('<div className="quest-layer">');
+
+    expect(hudStackStart).toBeGreaterThanOrEqual(0);
+    expect(avatarLayerStart).toBeGreaterThan(hudStackStart);
+    expect(questLayerStart).toBeGreaterThan(avatarPanelUse);
+    const questPanelStyleStart = css.indexOf(".quest-hud-panel {");
+    const questPanelStyleEnd = css.indexOf(".quest-hud-panel::before");
+    const questPanelStyle = css.slice(questPanelStyleStart, questPanelStyleEnd);
+    const questNoticeStart = css.indexOf("@keyframes quest-notice");
+    const questNoticeEnd = css.indexOf("@media", questNoticeStart);
+    const questNoticeKeyframes = css.slice(questNoticeStart, questNoticeEnd);
+
+    expect(questPanelStyleStart).toBeGreaterThanOrEqual(0);
+    expect(questPanelStyleEnd).toBeGreaterThan(questPanelStyleStart);
+    expect(questNoticeStart).toBeGreaterThanOrEqual(0);
+    expect(questNoticeEnd).toBeGreaterThan(questNoticeStart);
+    expect(css).toContain(".quest-layer");
+    expect(css).toContain(".quest-hud-panel");
+    expect(css).toContain("--quest-accent");
+    expect(css).toContain(".quest-hud-panel::before");
+    expect(css).toContain("linear-gradient(90deg");
+    expect(css).toContain("border-left");
+    expect(css).toContain("var(--quest-duration");
+    expect(questPanelStyle).not.toContain("border: 1px solid");
+    expect(questPanelStyle).not.toContain("0 16px 42px rgba(0, 0, 0, 0.3)");
+    expect(questNoticeKeyframes).toContain("transform: translateX(-42px) scale(0.96)");
+    expect(questNoticeKeyframes).toContain("transform: translateX(-48px) scale(0.98)");
+    expect(questNoticeKeyframes).not.toContain("transform: translateX(42px) scale(0.98)");
+    expect(css).not.toContain(".quest-hud-mark");
+    expect(css).not.toContain(".quest-progress-fill");
+    expect(css).toContain(".quest-panel");
+    expect(css).toContain(".export-result span");
   });
 });

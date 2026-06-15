@@ -211,7 +211,7 @@ h2 {
   position: absolute;
   left: 6%;
   right: 6%;
-  bottom: 7%;
+  bottom: 5%;
   z-index: 2;
   display: grid;
   gap: 8px;
@@ -228,6 +228,72 @@ h2 {
   line-height: 1;
   background: rgba(16, 16, 17, 0.76);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+.quest-layer {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.quest-hud-panel {
+  --quest-accent: #ffcf70;
+  position: relative;
+  display: grid;
+  gap: 5px;
+  align-items: start;
+  overflow: hidden;
+  border-left: 3px solid var(--quest-accent);
+  border-radius: 0 8px 8px 0;
+  padding: 11px 14px 11px 16px;
+  color: #fffaf2;
+  background: linear-gradient(90deg, rgba(10, 10, 11, 0.88), rgba(10, 10, 11, 0.56) 62%, transparent);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+  animation: quest-notice var(--quest-duration, 1.8s) cubic-bezier(0.18, 0.9, 0.2, 1);
+}
+
+.quest-hud-panel::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--quest-accent), transparent 72%), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 52%);
+  content: "";
+  pointer-events: none;
+}
+
+.quest-hud-panel--active {
+  --quest-accent: #8ddfc7;
+}
+
+.quest-hud-panel--completed {
+  --quest-accent: #ffd98d;
+}
+
+.quest-hud-panel--failed {
+  --quest-accent: #ff7070;
+}
+
+.quest-hud-panel span {
+  position: relative;
+  color: var(--quest-accent);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+  text-shadow: 0 1px 8px color-mix(in srgb, var(--quest-accent), transparent 52%);
+}
+
+.quest-hud-panel strong {
+  position: relative;
+  overflow: hidden;
+  color: rgba(255, 250, 242, 0.96);
+  font-size: 22px;
+  font-weight: 950;
+  line-height: 1.12;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.42);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .avatar-hud-panel--calm {
@@ -636,6 +702,7 @@ h2 {
 .delta-form,
 .status-editor,
 .export-panel,
+.quest-panel,
 .avatar-panel,
 .history-panel {
   display: grid;
@@ -757,6 +824,28 @@ button:disabled {
 .avatar-panel {
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
   padding-bottom: 18px;
+}
+
+.quest-panel {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  padding-bottom: 18px;
+}
+
+.quest-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.quest-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.quest-controls input[type="range"] {
+  padding: 0;
+  accent-color: #1f1d1b;
+  background: transparent;
 }
 
 .avatar-controls {
@@ -889,6 +978,16 @@ button:disabled {
   color: #23624d;
   font-size: 13px;
   font-weight: 800;
+}
+
+.export-result span {
+  display: block;
+  margin-top: 4px;
+  color: #5e5750;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .status-list,
@@ -1062,13 +1161,40 @@ button:disabled {
   }
 }
 
+@keyframes quest-notice {
+  0% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateX(-42px) scale(0.96);
+  }
+
+  18% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0) scale(1);
+  }
+
+  78% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateX(-48px) scale(0.98);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hud-bar,
   .meter-fill,
   .meter-sheen,
   .delta-pop,
   .delta-pop::before,
-  .delta-pop::after {
+  .delta-pop::after,
+  .quest-hud-panel {
     animation: none;
     transition: none;
   }
@@ -1154,15 +1280,36 @@ button:disabled {
     height: 7px;
   }
 
+  .quest-layer {
+    margin-top: 4px;
+  }
+
+  .quest-hud-panel {
+    gap: 3px;
+    min-height: 36px;
+    padding: 7px 9px;
+  }
+
+  .quest-hud-panel span {
+    font-size: 8px;
+    line-height: 1;
+  }
+
+  .quest-hud-panel strong {
+    font-size: 12px;
+    line-height: 1;
+  }
+
   .avatar-hud-panel {
-    grid-template-columns: 58px minmax(0, 1fr);
-    gap: 9px;
-    min-height: 76px;
-    padding: 9px;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 7px;
+    min-height: 44px;
+    padding: 5px;
   }
 
   .avatar-layer {
-    display: block;
+    bottom: 3%;
+    gap: 5px;
   }
 
   .avatar-layer-title {
@@ -1179,7 +1326,7 @@ button:disabled {
   }
 
   .avatar-hud-meta span {
-    font-size: 11px;
+    font-size: 9px;
   }
 
   .avatar-hud-meta strong {
@@ -1191,7 +1338,7 @@ button:disabled {
   }
 
   .avatar-hud-portrait span {
-    font-size: 22px;
+    font-size: 18px;
   }
 
   .hud-action-form {

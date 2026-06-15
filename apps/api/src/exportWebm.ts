@@ -3,6 +3,8 @@ import { renderWithRemotion } from "./remotionHudRenderer.js";
 type SupportedExportFormat = "mov-prores-alpha" | "webm-alpha";
 type ExportScope = "single" | "all";
 type ExportSource = "current" | "recording";
+export type ExportKind = "status" | "quest";
+type QuestState = "start" | "active" | "completed" | "failed";
 
 export type ExportStatusIconStep = {
   maxPercent: number;
@@ -21,12 +23,14 @@ export type ExportStatus = {
 };
 
 export type ExportRequestPayload = {
-  statuses: ExportStatus[];
-  statusId: string;
-  delta: number;
+  kind?: ExportKind;
+  statuses?: ExportStatus[];
+  statusId?: string;
+  delta?: number;
   scope?: ExportScope;
   source?: ExportSource;
   events?: ExportEventPayload[];
+  quest?: QuestExportPayload;
   preset: {
     width: number;
     height: number;
@@ -35,6 +39,12 @@ export type ExportRequestPayload = {
     leadInMs?: number;
     format: SupportedExportFormat;
   };
+};
+
+export type QuestExportPayload = {
+  title: string;
+  label: string;
+  state: QuestState;
 };
 
 export type ExportEventPayload = {
@@ -46,6 +56,9 @@ export type ExportEventPayload = {
 };
 
 export type NormalizedExportRequest = ExportRequestPayload & {
+  kind: ExportKind;
+  statuses: ExportStatus[];
+  quest?: QuestExportPayload;
   scope: ExportScope;
   source: ExportSource;
   event: {
@@ -83,16 +96,12 @@ export function exportMimeType(format: SupportedExportFormat): "video/quicktime"
   return format === "mov-prores-alpha" ? "video/quicktime" : "video/webm";
 }
 
-export function exportFilename(format: SupportedExportFormat): string {
-  return `buffpop-overlay.${exportExtension(format)}`;
+export function exportFilename(format: SupportedExportFormat, kind: ExportKind = "status"): string {
+  return `buffpop-${kind === "quest" ? "quest" : "overlay"}.${exportExtension(format)}`;
 }
 
 export function normalizeExportRequest(payload: ExportRequestPayload): NormalizedExportRequest {
-  if (!Array.isArray(payload.statuses) || payload.statuses.length === 0) {
-    throw new Error("statuses must contain at least one status.");
-  }
-
-  assertFiniteNumber(payload.delta, "delta");
+  const kind = payload.kind ?? "status";
   assertFiniteNumber(payload.preset.width, "width");
   assertFiniteNumber(payload.preset.height, "height");
   assertFiniteNumber(payload.preset.fps, "fps");
@@ -104,6 +113,62 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
   if (payload.preset.format !== "webm-alpha" && payload.preset.format !== "mov-prores-alpha") {
     throw new Error("Only MOV ProRes alpha and WebM alpha export are supported.");
   }
+
+  if (kind === "quest") {
+    if (!payload.quest) {
+      throw new Error("quest is required for quest exports.");
+    }
+
+    const questState = payload.quest.state;
+
+    if (
+      questState !== "start" &&
+      questState !== "active" &&
+      questState !== "completed" &&
+      questState !== "failed"
+    ) {
+      throw new Error("Unsupported quest state.");
+    }
+
+    return {
+      ...payload,
+      kind,
+      statuses: [],
+      delta: 0,
+      scope: "single",
+      source: "current",
+      events: [],
+      quest: {
+        title: String(payload.quest.title ?? "").trim() || "未命名任务",
+        label: String(payload.quest.label ?? "").trim() || "MISSION START",
+        state: questState,
+      },
+      preset: {
+        ...payload.preset,
+        width: Math.round(payload.preset.width),
+        height: Math.round(payload.preset.height),
+        fps: Math.round(payload.preset.fps),
+        durationMs: Math.round(payload.preset.durationMs),
+        leadInMs: Math.max(0, Math.round(payload.preset.leadInMs ?? 0)),
+      },
+      event: {
+        statusId: "quest",
+        from: 0,
+        to: 0,
+        delta: 0,
+      },
+    };
+  }
+
+  if (!Array.isArray(payload.statuses) || payload.statuses.length === 0) {
+    throw new Error("statuses must contain at least one status.");
+  }
+
+  if (!payload.statusId) {
+    throw new Error("statusId is required.");
+  }
+
+  assertFiniteNumber(payload.delta, "delta");
 
   const scope = payload.scope ?? "all";
   const source = payload.source ?? "current";
@@ -181,6 +246,7 @@ export function normalizeExportRequest(payload: ExportRequestPayload): Normalize
 
   return {
     ...payload,
+    kind,
     statuses,
     delta: Math.round(payload.delta),
     scope,

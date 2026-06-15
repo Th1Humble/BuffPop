@@ -30,11 +30,20 @@ export type ExportResult = {
   blob: Blob;
   filename: string;
   mimeType: string;
+  savedPath?: string;
 };
 
 export type ExportScope = "single" | "all";
 export type ExportSource = "current" | "recording";
 export type AvatarMood = "happy" | "calm" | "tired" | "hungry";
+export type QuestExportState = "start" | "active" | "completed" | "failed";
+
+export type QuestExportConfig = {
+  title: string;
+  label: string;
+  state: QuestExportState;
+  holdSeconds: number;
+};
 
 export type AvatarExportConfig = {
   mood: AvatarMood;
@@ -70,6 +79,12 @@ const allExportPreset: ExportPreset = {
 const avatarExportPreset = {
   width: 1080,
   height: 960,
+};
+const questExportPreset: ExportPreset = {
+  ...defaultExportPreset,
+  height: 360,
+  durationMs: 1800,
+  leadInMs: 0,
 };
 const avatarMoodMap: Record<AvatarMood, { symbol: string; color: string; accent: string }> = {
   happy: { symbol: "😄", color: "#ffcf70", accent: "#ff4f92" },
@@ -532,6 +547,67 @@ function fallbackMimeTypeForFormat(format: ExportPreset["format"]): string {
   return format === "mov-prores-alpha" ? "video/quicktime" : "video/webm";
 }
 
+function getSavedPathFromResponse(response: Response): string | undefined {
+  const encodedPath = response.headers.get("x-buffpop-saved-path");
+
+  if (!encodedPath) {
+    return undefined;
+  }
+
+  try {
+    return decodeURIComponent(encodedPath);
+  } catch {
+    return encodedPath;
+  }
+}
+
+function questDurationMs(holdSeconds: number): number {
+  return Math.round(Math.min(Math.max(holdSeconds, 0.6), 5) * 1000);
+}
+
+export async function exportQuestToVideo({
+  config,
+  fetcher = fetch,
+}: {
+  config: QuestExportConfig;
+  fetcher?: ExportFetcher;
+}): Promise<ExportResult> {
+  const preset = {
+    ...questExportPreset,
+    durationMs: questDurationMs(config.holdSeconds),
+  };
+
+  const response = await fetcher("http://127.0.0.1:5190/export/video", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      kind: "quest",
+      quest: {
+        title: config.title,
+        label: config.label,
+        state: config.state,
+      },
+      preset,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(errorPayload?.message ?? "Quest video export failed.");
+  }
+
+  const blob = await response.blob();
+
+  return {
+    blob,
+    filename: preset.format === "mov-prores-alpha" ? "buffpop-quest.mov" : "buffpop-quest.webm",
+    mimeType: blob.type || fallbackMimeTypeForFormat(preset.format),
+    savedPath: getSavedPathFromResponse(response),
+  };
+}
+
 export async function exportPlanToVideo({
   plan,
   copy: _copy,
@@ -592,6 +668,7 @@ export async function exportPlanToVideo({
     blob,
     filename: filenameForFormat(preset.format),
     mimeType: blob.type || fallbackMimeTypeForFormat(preset.format),
+    savedPath: getSavedPathFromResponse(response),
   };
 }
 
@@ -600,6 +677,14 @@ export function downloadBlob(blob: Blob, filename: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export function shouldUseBrowserDownload(result: ExportResult): boolean {
+  return !result.savedPath;
 }

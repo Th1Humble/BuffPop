@@ -7,8 +7,10 @@ import { renderMedia as remotionRenderMedia, type RenderMediaOptions } from "@re
 import type { VideoConfig } from "remotion/no-react";
 import {
   buffPopCompositionId,
+  buffPopQuestCompositionId,
   getRemotionDurationInFrames,
   type RemotionHudProps,
+  type RemotionQuestProps,
 } from "./remotionHudTypes.js";
 import type { NormalizedExportRequest } from "./exportWebm.js";
 
@@ -50,11 +52,32 @@ export function toRemotionHudProps(request: NormalizedExportRequest): RemotionHu
   };
 }
 
+export function toRemotionQuestProps(request: NormalizedExportRequest): RemotionQuestProps {
+  return {
+    quest: request.quest ?? {
+      title: "未命名任务",
+      label: "MISSION START",
+      state: "start",
+    },
+    preset: {
+      width: request.preset.width,
+      height: request.preset.height,
+      fps: request.preset.fps,
+      durationMs: request.preset.durationMs,
+      leadInMs: request.preset.leadInMs,
+    },
+  };
+}
+
+function inputPropsForRequest(request: NormalizedExportRequest): RemotionHudProps | RemotionQuestProps {
+  return request.kind === "quest" ? toRemotionQuestProps(request) : toRemotionHudProps(request);
+}
+
 export function buildRemotionComposition(request: NormalizedExportRequest): VideoConfig {
-  const props = toRemotionHudProps(request);
+  const props = inputPropsForRequest(request);
 
   return {
-    id: buffPopCompositionId,
+    id: request.kind === "quest" ? buffPopQuestCompositionId : buffPopCompositionId,
     width: request.preset.width,
     height: request.preset.height,
     fps: request.preset.fps,
@@ -81,7 +104,7 @@ export function buildRemotionRenderOptions({
 }): RenderMediaOptions {
   const baseOptions = {
     composition: buildRemotionComposition(request),
-    inputProps: toRemotionHudProps(request),
+    inputProps: inputPropsForRequest(request),
     imageFormat: "png" as const,
     logLevel: "warn" as const,
     muted: true,
@@ -125,8 +148,12 @@ export function buildRemotionBundleOptions(): BundleOptions {
   };
 }
 
-function remotionExportFilename(format: NormalizedExportRequest["preset"]["format"]): string {
-  return format === "mov-prores-alpha" ? "buffpop-overlay.mov" : "buffpop-overlay.webm";
+function remotionExportFilename(
+  format: NormalizedExportRequest["preset"]["format"],
+  kind: NormalizedExportRequest["kind"],
+): string {
+  const basename = kind === "quest" ? "buffpop-quest" : "buffpop-overlay";
+  return format === "mov-prores-alpha" ? `${basename}.mov` : `${basename}.webm`;
 }
 
 export async function renderWithRemotion(
@@ -134,7 +161,7 @@ export async function renderWithRemotion(
   dependencies: RemotionRenderDependencies = {},
 ): Promise<Buffer> {
   const directory = await mkdtemp(join(tmpdir(), "buffpop-remotion-"));
-  const outputLocation = join(directory, remotionExportFilename(request.preset.format));
+  const outputLocation = join(directory, remotionExportFilename(request.preset.format, request.kind));
   const bundle = dependencies.bundle ?? remotionBundle;
   const renderMedia = dependencies.renderMedia ?? remotionRenderMedia;
 
